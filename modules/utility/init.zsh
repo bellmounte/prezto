@@ -41,33 +41,8 @@ alias ftp='noglob ftp'
 alias history='noglob history'
 alias locate='noglob locate'
 alias rake='noglob rake'
-alias rsync='noglob rsync_wrap'
-alias scp='noglob scp_wrap'
-# This function wraps rsync and scp so that remote paths are not globbed
-# but local paths are globbed. This is because the programs have their own
-# globbing for remote paths. The wrap function globs args starting in / and ./
-# and doesn't glob paths with : in it as these are interpreted as remote paths
-# by these programs unless the path starts with / or ./
-function rsync_scp_wrap {
-  local args=( )
-  local cmd="$1"
-  shift
-  local i
-  for i in "$@"; do case $i in
-    ( ./* ) args+=( ${~i} ) ;; # glob
-    (  /* ) args+=( ${~i} ) ;; # glob
-    ( *:* ) args+=( ${i}  ) ;; # noglob
-    (  *  ) args+=( ${~i} ) ;; # glob
-  esac; done
-  command $cmd "${(@)args}"
-}
-function rsync_wrap {
-  rsync_scp_wrap "rsync" "$@"
-}
-function scp_wrap {
-  rsync_scp_wrap "scp" "$@"
-}
-
+alias rsync='noglob rsync'
+alias scp='noglob scp'
 alias sftp='noglob sftp'
 
 # Define general aliases.
@@ -89,10 +64,10 @@ alias mvi="${aliases[mv]:-mv} -i"
 alias cpi="${aliases[cp]:-cp} -i"
 alias lni="${aliases[ln]:-ln} -i"
 if zstyle -T ':prezto:module:utility' safe-ops; then
-  alias rm="${aliases[rm]:-rm} -i"
-  alias mv="${aliases[mv]:-mv} -i"
-  alias cp="${aliases[cp]:-cp} -i"
-  alias ln="${aliases[ln]:-ln} -i"
+  alias rm='rmi'
+  alias mv='mvi'
+  alias cp='cpi'
+  alias ln='lni'
 fi
 
 # ls
@@ -101,10 +76,13 @@ if is-callable 'dircolors'; then
   alias ls='ls --group-directories-first'
 
   if zstyle -t ':prezto:module:utility:ls' color; then
-    if [[ -s "$HOME/.dir_colors" ]]; then
-      eval "$(dircolors --sh "$HOME/.dir_colors")"
-    else
-      eval "$(dircolors --sh)"
+    # Call dircolors to define colors if they're missing
+    if [[ -z "$LS_COLORS" ]]; then
+      if [[ -s "$HOME/.dir_colors" ]]; then
+        eval "$(dircolors --sh "$HOME/.dir_colors")"
+      else
+        eval "$(dircolors --sh)"
+      fi
     fi
 
     alias ls="${aliases[ls]:-ls} --color=auto"
@@ -114,11 +92,15 @@ if is-callable 'dircolors'; then
 else
   # BSD Core Utilities
   if zstyle -t ':prezto:module:utility:ls' color; then
-    # Define colors for BSD ls.
-    export LSCOLORS='exfxcxdxbxGxDxabagacad'
+    # Define colors for BSD ls if they're not already defined
+    if [[ -z "$LSCOLORS" ]]; then
+      export LSCOLORS='exfxcxdxbxGxDxabagacad'
+    fi
 
-    # Define colors for the completion system.
-    export LS_COLORS='di=34:ln=35:so=32:pi=33:ex=31:bd=36;01:cd=33;01:su=31;40;07:sg=36;40;07:tw=32;40;07:ow=33;40;07:'
+    # Define colors for the completion system if they're not already defined
+    if [[ -z "$LS_COLORS" ]]; then
+      export LS_COLORS='di=34:ln=35:so=32:pi=33:ex=31:bd=36;01:cd=33;01:su=31;40;07:sg=36;40;07:tw=32;40;07:ow=33;40;07:'
+    fi
 
     alias ls="${aliases[ls]:-ls} -G"
   else
@@ -146,7 +128,7 @@ if zstyle -t ':prezto:module:utility:grep' color; then
   alias grep="${aliases[grep]:-grep} --color=auto"
 fi
 
-# Mac OS X Everywhere
+# macOS Everywhere
 if [[ "$OSTYPE" == darwin* ]]; then
   alias o='open'
 elif [[ "$OSTYPE" == cygwin* ]]; then
@@ -176,12 +158,7 @@ elif (( $+commands[wget] )); then
 fi
 
 # Resource Usage
-if (( $+commands[pydf] )); then
-  alias df=pydf
-else
-  alias df='df -kh'
-fi
-
+alias df='df -kh'
 alias du='du -kh'
 
 if [[ "$OSTYPE" == (darwin*|*bsd*) ]]; then
@@ -238,4 +215,28 @@ function find-exec {
 # Displays user owned processes status.
 function psu {
   ps -U "${1:-$LOGNAME}" -o 'pid,%cpu,%mem,command' "${(@)argv[2,-1]}"
+}
+
+# Enables globbing selectively on path arguments.
+# Globbing is enabled on local paths (starting in '/' and './') and disabled
+# on remote paths (containing ':' but not starting in '/' and './'). This is
+# useful for programs that have their own globbing for remote paths.
+# Currently, this is used by default for 'rsync' and 'scp'.
+# Example:
+#   - Local: '*.txt', './foo:2017*.txt', '/var/*:log.txt'
+#   - Remote: user@localhost:foo/
+#
+# NOTE: This function is buggy and is not used anywhere until we can make sure
+# it's fixed. See https://github.com/sorin-ionescu/prezto/issues/1443 and
+# https://github.com/sorin-ionescu/prezto/issues/1521 for more information.
+function noremoteglob {
+  local -a argo
+  local cmd="$1"
+  for arg in ${argv:2}; do case $arg in
+    ( ./* ) argo+=( ${~arg} ) ;; # local relative, glob
+    (  /* ) argo+=( ${~arg} ) ;; # local absolute, glob
+    ( *:* ) argo+=( ${arg}  ) ;; # remote, noglob
+    (  *  ) argo+=( ${~arg} ) ;; # default, glob
+  esac; done
+  command $cmd "${(@)argo}"
 }
